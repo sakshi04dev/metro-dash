@@ -1,0 +1,570 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#080d20">
+<title>Metro Dash</title>
+
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #080d20;
+  color: white;
+  font-family: Arial, sans-serif;
+  overflow: hidden;
+  touch-action: none;
+}
+#game {
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  touch-action: none;
+}
+#hud {
+  position: fixed;
+  top: 15px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none;
+}
+.stat {
+  background: #101a32dd;
+  border: 1px solid #536b93;
+  border-radius: 12px;
+  padding: 9px 12px;
+  font-size: 13px;
+  box-shadow: 0 4px 15px #0005;
+}
+.stat strong {
+  color: #ffe45c;
+  font-size: 18px;
+  display: block;
+  margin-top: 3px;
+}
+#menu {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  background: #050a19a8;
+}
+.panel {
+  width: min(100%, 350px);
+  text-align: center;
+  padding: 27px 20px;
+  background: linear-gradient(145deg,#15284b,#101124);
+  border: 2px solid #47e9f5;
+  border-radius: 24px;
+  box-shadow: 0 0 35px #18c9ef33;
+}
+.logo {
+  font-size: 35px;
+  font-weight: 1000;
+  letter-spacing: -1px;
+  color: #ffe45c;
+  text-shadow: 3px 3px #f05a70;
+}
+.panel p {
+  color: #d4deef;
+  font-size: 14px;
+  line-height: 1.7;
+}
+button {
+  border: 0;
+  cursor: pointer;
+  color: #10152a;
+  font-weight: 900;
+  -webkit-tap-highlight-color: transparent;
+}
+#start {
+  width: 100%;
+  padding: 15px;
+  border-radius: 13px;
+  background: linear-gradient(90deg,#ffe45c,#ffb938);
+  font-size: 17px;
+  margin-top: 10px;
+}
+#controls {
+  position: fixed;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+}
+.ctrl {
+  width: 61px;
+  height: 57px;
+  border-radius: 17px;
+  background: #142541dd;
+  color: white;
+  border: 1px solid #53ddec;
+  font-size: 23px;
+  box-shadow: 0 4px 0 #071021;
+}
+.ctrl:active { background: #247c99; transform: translateY(2px); }
+#jump { color: #ffe45c; }
+#slide { color: #9beaff; }
+#hint {
+  position: fixed;
+  bottom: 91px;
+  width: 100%;
+  text-align: center;
+  color: #ffffffc9;
+  font-size: 11px;
+  pointer-events: none;
+}
+.hidden { display: none !important; }
+</style>
+</head>
+
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="stat">DISTANCE<strong id="score">0 m</strong></div>
+  <div class="stat">🪙 COINS<strong id="coins">0</strong></div>
+  <div class="stat">BEST<strong id="best">0 m</strong></div>
+</div>
+
+<div id="hint">SWIPE OR TAP THE ARROWS TO MOVE</div>
+
+<div id="controls">
+  <button class="ctrl" id="left" aria-label="Move left">◀</button>
+  <button class="ctrl" id="jump" aria-label="Jump">⬆</button>
+  <button class="ctrl" id="slide" aria-label="Slide">⬇</button>
+  <button class="ctrl" id="right" aria-label="Move right">▶</button>
+</div>
+
+<div id="menu">
+  <div class="panel">
+    <div style="font-size:43px">🚆</div>
+    <div class="logo">METRO DASH</div>
+    <p id="message">Run fast. Dodge trains. Collect coins.<br>Your endless city adventure starts here!</p>
+    <p>◀ ▶ Move &nbsp; • &nbsp; ⬆ Jump &nbsp; • &nbsp; ⬇ Slide</p>
+    <button id="start">▶ START RUNNING</button>
+    <p style="font-size:11px;color:#8fa5c9">STUDENT GAME PROJECT • VERSION 1.0</p>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const menu = document.getElementById("menu");
+const startBtn = document.getElementById("start");
+const message = document.getElementById("message");
+
+let W = 390, H = 700, last = 0;
+let running = false;
+let lane = 1, playerX = 1;
+let jump = 0, slide = 0;
+let speed = 0.30, distance = 0, coinCount = 0;
+let objects = [], spawnTimer = 0;
+let best = 0;
+
+try { best = Number(localStorage.getItem("metroDashBest")) || 0; }
+catch(e) {}
+document.getElementById("best").textContent = best + " m";
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+function road(y) {
+  return W * (0.055 + 0.43 * y);
+}
+function center(y) { return W / 2; }
+function laneX(l, y) {
+  return center(y) + (l - 1) * road(y) * 0.62;
+}
+function project(z) {
+  return 0.13 + (1 - z) * 0.87;
+}
+function py(z) {
+  return H * (0.15 + project(z) * 0.72);
+}
+function px(l, z) {
+  return laneX(l, project(z));
+}
+function scale(z) {
+  return 0.18 + project(z) * 0.95;
+}
+
+function polygon(points, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for(let i=1;i<points.length;i++) ctx.lineTo(points[i][0], points[i][1]);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawBackground() {
+  const sky = ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#11183e");
+  sky.addColorStop(0.55,"#e36b83");
+  sky.addColorStop(1,"#ffb16c");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0,0,W,H);
+
+  // Moon and distant skyline
+  ctx.fillStyle = "#ffe9b0";
+  ctx.beginPath();
+  ctx.arc(W*0.78,H*0.16,Math.min(W,H)*0.055,0,Math.PI*2);
+  ctx.fill();
+
+  for(let side=0;side<2;side++) {
+    for(let i=0;i<8;i++) {
+      const bw = W*0.07;
+      const bh = H*(0.09+(i%4)*0.035);
+      const x = side===0 ? i*bw : W-(i+1)*bw;
+      const y = H*0.36-bh;
+      ctx.fillStyle = i%2 ? "#28365d" : "#202c4c";
+      ctx.fillRect(x,y,bw-2,bh);
+      ctx.fillStyle = "#f7cf7b88";
+      for(let wy=y+9;wy<y+bh-5;wy+=13)
+        for(let wx=x+5;wx<x+bw-4;wx+=10)
+          ctx.fillRect(wx,wy,4,5);
+    }
+  }
+
+  // Railway ground
+  polygon([
+    [W*0.43,H*0.27],[W*0.57,H*0.27],
+    [W*1.25,H],[W*-0.25,H]
+  ],"#34394b");
+
+  // Track shoulders
+  polygon([
+    [W*0.415,H*0.27],[W*0.43,H*0.27],
+    [W*0.22,H],[W*0.18,H]
+  ],"#77717b");
+  polygon([
+    [W*0.57,H*0.27],[W*0.585,H*0.27],
+    [W*0.82,H],[W*0.78,H]
+  ],"#77717b");
+
+  // Sleepers
+  for(let i=0;i<18;i++) {
+    const z = ((i/18 + (distance*0.018)%1)%1);
+    const y = H*(0.27+z*0.73);
+    const rw = road(z);
+    ctx.strokeStyle = "#b1a0a0";
+    ctx.lineWidth = 1+z*8;
+    ctx.beginPath();
+    ctx.moveTo(W/2-rw*0.48,y);
+    ctx.lineTo(W/2+rw*0.48,y);
+    ctx.stroke();
+  }
+
+  // Three lane rails
+  for(let l=0;l<3;l++) {
+    const offset = (l-1)*0.62;
+    ctx.strokeStyle = "#c6d0dc";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(W/2+offset*W*0.055,H*0.27);
+    ctx.lineTo(W/2+offset*W*0.43,H);
+    ctx.stroke();
+    ctx.strokeStyle = "#69798d";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(W/2+offset*W*0.055,H*0.275);
+    ctx.lineTo(W/2+offset*W*0.43,H);
+    ctx.stroke();
+  }
+}
+
+function drawCoin(o) {
+  const s=scale(o.z), x=px(o.lane,o.z), y=py(o.z);
+  ctx.fillStyle="#ffb900";
+  ctx.beginPath();
+  ctx.ellipse(x,y,8*s,11*s,0,0,Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle="#fff18b";
+  ctx.lineWidth=2*s;
+  ctx.stroke();
+  ctx.fillStyle="#fff0a1";
+  ctx.fillRect(x-1*s,y-6*s,2*s,12*s);
+}
+
+function drawObstacle(o) {
+  const s=scale(o.z), x=px(o.lane,o.z), y=py(o.z);
+  const w=48*s, h=72*s;
+
+  if(o.type==="train") {
+    ctx.fillStyle="#111b30";
+    ctx.fillRect(x-w/2+4*s,y-h+5*s,w,h);
+    const grad=ctx.createLinearGradient(x-w/2,y-h,x+w/2,y);
+    grad.addColorStop(0,"#ed536b");
+    grad.addColorStop(1,"#8b244d");
+    ctx.fillStyle=grad;
+    ctx.fillRect(x-w/2,y-h,w,h);
+    ctx.fillStyle="#ffd5a0";
+    ctx.fillRect(x-w/2,y-h,w,7*s);
+    ctx.fillStyle="#94edff";
+    ctx.fillRect(x-w/2+6*s,y-h+14*s,w*0.3,15*s);
+    ctx.fillRect(x+4*s,y-h+14*s,w*0.3,15*s);
+    ctx.fillStyle="#34334d";
+    ctx.fillRect(x-w/2+5*s,y-12*s,w-10*s,9*s);
+    ctx.fillStyle="#fff0a2";
+    ctx.fillRect(x-w/2+5*s,y-h+4*s,5*s,4*s);
+    ctx.fillRect(x+w/2-10*s,y-h+4*s,5*s,4*s);
+  } else if(o.type==="barrier") {
+    ctx.fillStyle="#6b3443";
+    ctx.fillRect(x-w/2,y-h*0.5,w,h*0.5);
+    ctx.fillStyle="#ffdc58";
+    ctx.fillRect(x-w/2,y-h*0.5,w,h*0.19);
+    ctx.fillStyle="#ef5364";
+    for(let i=0;i<3;i++)
+      ctx.fillRect(x-w/2+i*w/3,y-h*0.5,w/7,h*0.5);
+  } else {
+    // Overhead obstacle: duck under it
+    ctx.fillStyle="#313f63";
+    ctx.fillRect(x-w/2,y-h,w,h*0.26);
+    ctx.fillStyle="#6ce9ef";
+    ctx.fillRect(x-w/2,y-h,w,h*0.11);
+    ctx.fillRect(x-w*0.38,y-h*0.74,w*0.12,h*0.45);
+    ctx.fillRect(x+w*0.26,y-h*0.74,w*0.12,h*0.45);
+  }
+}
+
+function drawPlayer() {
+  const x=laneX(playerX,0.92);
+  const ground=H*0.84;
+  const jh=jump>0 ? Math.sin((1-jump)*Math.PI)*H*0.15 : 0;
+  const sl=slide>0;
+  const y=ground-jh;
+  const s=Math.min(W/390,1.2);
+
+  // Shadow
+  ctx.fillStyle="#11152b88";
+  ctx.beginPath();
+  ctx.ellipse(x,ground+7,19*s,6*s,0,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(x,y);
+  if(sl) {
+    ctx.rotate(-0.12);
+    ctx.fillStyle="#ffb73f";
+    ctx.fillRect(-17*s,-20*s,33*s,15*s);
+    ctx.fillStyle="#39d7e9";
+    ctx.fillRect(-12*s,-17*s,24*s,8*s);
+    ctx.fillStyle="#f4c39a";
+    ctx.beginPath();
+    ctx.arc(15*s,-20*s,10*s,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle="#17233e";
+    ctx.fillRect(4*s,-29*s,19*s,6*s);
+  } else {
+    // Legs
+    ctx.strokeStyle="#25324d";
+    ctx.lineWidth=7*s;
+    ctx.lineCap="round";
+    ctx.beginPath();
+    ctx.moveTo(-5*s,-15*s);
+    ctx.lineTo(-9*s,0);
+    ctx.moveTo(5*s,-15*s);
+    ctx.lineTo(10*s,0);
+    ctx.stroke();
+
+    // Shoes
+    ctx.fillStyle="#ffe35b";
+    ctx.fillRect(-16*s,-3*s,13*s,5*s);
+    ctx.fillRect(5*s,-3*s,13*s,5*s);
+
+    // Body and hoodie
+    ctx.fillStyle="#14cde1";
+    ctx.fillRect(-13*s,-43*s,26*s,29*s);
+    ctx.fillStyle="#0a6e9a";
+    ctx.fillRect(-13*s,-43*s,26*s,7*s);
+
+    // Arms
+    ctx.strokeStyle="#f4c39a";
+    ctx.lineWidth=6*s;
+    ctx.beginPath();
+    ctx.moveTo(-11*s,-37*s);
+    ctx.lineTo(-18*s,-23*s);
+    ctx.moveTo(11*s,-37*s);
+    ctx.lineTo(18*s,-28*s);
+    ctx.stroke();
+
+    // Face
+    ctx.fillStyle="#f4c39a";
+    ctx.beginPath();
+    ctx.arc(0,-53*s,12*s,0,Math.PI*2);
+    ctx.fill();
+
+    // Hair and cap
+    ctx.fillStyle="#24314d";
+    ctx.beginPath();
+    ctx.arc(0,-57*s,12*s,Math.PI,Math.PI*2);
+    ctx.fill();
+    ctx.fillRect(-12*s,-59*s,24*s,5*s);
+    ctx.fillStyle="#ffde52";
+    ctx.fillRect(-14*s,-56*s,18*s,4*s);
+
+    // Eyes
+    ctx.fillStyle="#17233e";
+    ctx.fillRect(-5*s,-54*s,2*s,3*s);
+    ctx.fillRect(4*s,-54*s,2*s,3*s);
+  }
+  ctx.restore();
+}
+
+function addObject(type,laneNum,z=1) {
+  objects.push({type,lane:laneNum,z,checked:false});
+}
+
+function spawn() {
+  const l=Math.floor(Math.random()*3);
+  const r=Math.random();
+  if(r<0.48) addObject("coin",l);
+  else if(r<0.72) addObject("barrier",l);
+  else if(r<0.88) addObject("overhead",l);
+  else addObject("train",l);
+
+  // Sometimes create a second lane challenge
+  if(Math.random()<0.25) {
+    let l2=(l+1+Math.floor(Math.random()*2))%3;
+    addObject(Math.random()<0.5?"coin":"train",l2,1.12);
+  }
+}
+
+function startGame() {
+  lane=1;
+  playerX=1;
+  jump=0;
+  slide=0;
+  speed=0.30;
+  distance=0;
+  coinCount=0;
+  objects=[];
+  spawnTimer=0;
+  last=performance.now();
+  running=true;
+  menu.classList.add("hidden");
+  document.getElementById("hint").classList.remove("hidden");
+  requestAnimationFrame(loop);
+}
+
+function endGame() {
+  running=false;
+  best=Math.max(best,Math.floor(distance));
+  try { localStorage.setItem("metroDashBest",best); } catch(e) {}
+  document.getElementById("best").textContent=best+" m";
+  message.innerHTML="Run over! 🚆<br>Distance: "+Math.floor(distance)+" m<br>Coins collected: "+coinCount+" 🪙";
+  startBtn.textContent="↻ PLAY AGAIN";
+  menu.classList.remove("hidden");
+}
+
+function moveLeft() { if(running) lane=Math.max(0,lane-1); }
+function moveRight() { if(running) lane=Math.min(2,lane+1); }
+function doJump() { if(running && jump<=0 && slide<=0) jump=1; }
+function doSlide() { if(running && jump<=0) slide=0.65; }
+
+document.getElementById("left").addEventListener("pointerdown",e=>{e.preventDefault();moveLeft();});
+document.getElementById("right").addEventListener("pointerdown",e=>{e.preventDefault();moveRight();});
+document.getElementById("jump").addEventListener("pointerdown",e=>{e.preventDefault();doJump();});
+document.getElementById("slide").addEventListener("pointerdown",e=>{e.preventDefault();doSlide();});
+startBtn.addEventListener("click",startGame);
+
+document.addEventListener("keydown",e=>{
+  if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key)) e.preventDefault();
+  if(e.key==="ArrowLeft"||e.key==="a") moveLeft();
+  if(e.key==="ArrowRight"||e.key==="d") moveRight();
+  if(e.key==="ArrowUp"||e.key===" ") doJump();
+  if(e.key==="ArrowDown"||e.key==="s") doSlide();
+  if(!running && e.key==="Enter") startGame();
+});
+
+let touchX=0,touchY=0;
+canvas.addEventListener("pointerdown",e=>{
+  touchX=e.clientX;
+  touchY=e.clientY;
+});
+canvas.addEventListener("pointerup",e=>{
+  const dx=e.clientX-touchX;
+  const dy=e.clientY-touchY;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<25) return;
+  if(Math.abs(dx)>Math.abs(dy)) dx<0?moveLeft():moveRight();
+  else dy<0?doJump():doSlide();
+});
+
+function update(dt) {
+  distance+=dt*speed*90;
+  speed=Math.min(0.68,0.30+distance/3000);
+  spawnTimer-=dt;
+
+  if(spawnTimer<=0) {
+    spawn();
+    spawnTimer=Math.max(0.42,0.95-speed*0.65);
+  }
+
+  playerX+=(lane-playerX)*Math.min(1,dt*12);
+  if(jump>0) jump=Math.max(0,jump-dt*1.45);
+  if(slide>0) slide=Math.max(0,slide-dt);
+
+  for(const o of objects) {
+    o.z-=dt*speed;
+    if(o.z<0.18 && o.z>-0.02 && !o.checked) {
+      o.checked=true;
+      if(o.type==="coin") {
+        if(Math.abs(o.lane-playerX)<0.48) coinCount++;
+      } else if(o.lane===lane) {
+        const avoided =
+          (o.type==="barrier" && jump>0.25) ||
+          (o.type==="overhead" && slide>0.1);
+        if(!avoided) {
+          endGame();
+          return;
+        }
+      }
+    }
+  }
+  objects=objects.filter(o=>o.z>-0.08);
+  document.getElementById("score").textContent=Math.floor(distance)+" m";
+  document.getElementById("coins").textContent=coinCount;
+}
+
+function render() {
+  drawBackground();
+  [...objects].sort((a,b)=>b.z-a.z).forEach(o=>{
+    if(o.type==="coin") drawCoin(o);
+    else drawObstacle(o);
+  });
+  drawPlayer();
+}
+
+function loop(now) {
+  if(!running) return;
+  const dt=Math.min((now-last)/1000,0.035);
+  last=now;
+  update(dt);
+  render();
+  if(running) requestAnimationFrame(loop);
+}
+
+render();
+</script>
+</body>
+</html>
